@@ -28,7 +28,7 @@ def error(status: int, code: str, message: str):
 
 
 def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine_factory=None):
-    path = db_path or os.getenv("DATABASE_PATH", "/data/chess-coach.db")
+    path = db_path or os.getenv("DATABASE_PATH", "./data/chess-coach.db")
     database = Database(path)
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="chess-analysis")
     stockfish_path = os.getenv("STOCKFISH_PATH", "/usr/games/stockfish")
@@ -37,10 +37,16 @@ def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         database.init()
+        database.recover_interrupted_analyses()
         yield
         executor.shutdown(wait=False, cancel_futures=True)
 
-    application = FastAPI(title="Chess Coach API", version="1.0.0", lifespan=lifespan)
+    application = FastAPI(
+        title="Chess Coach API",
+        version="1.0.0",
+        lifespan=lifespan,
+        root_path="/api",
+    )
     application.state.db = database
 
     @application.exception_handler(RequestValidationError)
@@ -117,9 +123,9 @@ def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine
                 raise HTTPException(502, {"code": "chesscom_error", "message": str(exc)}) from exc
         imported = []
         rejected = 0
-        for index, pgn in enumerate(pgns):
+        for pgn in pgns:
             try:
-                result = import_text(pgn, "chess.com", f"{payload.username}:{index}")
+                result = import_text(pgn, "chess.com", payload.username.lower())
                 imported.extend(result["games"])
             except HTTPException:
                 rejected += 1

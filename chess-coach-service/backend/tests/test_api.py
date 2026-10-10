@@ -42,6 +42,29 @@ def test_settings_round_trip_masks_secret(client):
     assert got["ai_api_key"] == "********"
     assert got["ai_api_key_configured"] is True
     assert "super-secret" not in str(got)
+    got["analysis_depth"] = 11
+    assert client.put("/settings", json=got).status_code == 200
+    assert client.app.state.db.get_settings(include_secret=True)["ai_api_key"] == "super-secret"
+    got["ai_api_key"] = ""
+    assert client.put("/settings", json=got).status_code == 200
+    assert client.app.state.db.get_settings(include_secret=True)["ai_api_key"] == "super-secret"
+
+
+def test_docs_use_proxy_prefixed_openapi_url(client):
+    docs = client.get("/docs")
+    assert docs.status_code == 200
+    assert "'/api/openapi.json'" in docs.text or '"/api/openapi.json"' in docs.text
+
+
+def test_interrupted_analysis_is_recoverable_after_restart(tmp_path: Path):
+    path = str(tmp_path / "restart.db")
+    first = create_app(path, run_jobs_inline=True, engine_factory=lambda: None)
+    with TestClient(first) as c:
+        game_id = c.post("/games/import-pgn", json={"pgn": PGN}).json()["games"][0]["id"]
+        first.state.db.set_analysis_status(game_id, "running")
+    second = create_app(path, run_jobs_inline=True, engine_factory=lambda: None)
+    with TestClient(second) as c:
+        assert c.get(f"/games/{game_id}").json()["analysis_status"] == "not_started"
 
 
 def test_ingest_list_detail_and_invalid_input(client):

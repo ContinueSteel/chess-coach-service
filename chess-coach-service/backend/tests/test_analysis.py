@@ -51,3 +51,22 @@ def test_real_stockfish_start_position_and_mate_when_available():
         assert mover_score(engine.analyse(mate, chess.engine.Limit(depth=8))["score"], mate.turn) > 90000
     finally:
         engine.quit()
+
+
+def test_delivering_checkmate_is_best_not_a_blunder():
+    parsed = parse_pgn_games('''[Event "Mate"]\n[Result "1-0"]\n\n1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6?? 4. Qxf7# 1-0''')[0]
+
+    class MateEngine:
+        def analyse(self, board, limit):
+            if board.is_checkmate():
+                return {"score": chess.engine.PovScore(chess.engine.Mate(0), board.turn), "pv": []}
+            moves = list(board.legal_moves)
+            played = list(parsed.game.mainline_moves())[len(board.move_stack)]
+            return {"score": chess.engine.PovScore(chess.engine.Cp(0), board.turn), "pv": [played] if played in moves else moves[:1]}
+
+    rows, _ = analyse_game(parsed.game, MateEngine(), depth=8, time_ms=0, thresholds=T)
+    mate = rows[-1]
+    assert mate["san"] == "Qxf7#"
+    assert mate["loss_cp"] == 0
+    assert mate["classification"] == "best"
+    assert mate["eval_cp"] == 100000

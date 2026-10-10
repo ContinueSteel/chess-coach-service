@@ -15,6 +15,18 @@ def mover_score(score: chess.engine.PovScore, mover: chess.Color) -> int:
     return int(value if value is not None else 0)
 
 
+def score_after_move(score: chess.engine.PovScore, mover: chess.Color, board: chess.Board) -> int:
+    """Return the post-move score from the mover's perspective.
+
+    UCI reports a terminal checkmate as Mate(0) for the losing side to move.
+    python-chess cannot infer that the requested POV delivered the mate, so
+    handle the terminal board explicitly before normal POV conversion.
+    """
+    if board.is_checkmate():
+        return MATE_SCORE if board.turn != mover else -MATE_SCORE
+    return mover_score(score, mover)
+
+
 def classify_loss(loss: int, thresholds: Thresholds) -> str:
     if loss <= 0:
         return "best"
@@ -74,7 +86,7 @@ def analyse_game(game, engine, depth: int, time_ms: int, thresholds: Thresholds)
         best_score = mover_score(before["score"], mover)
         board.push(move)
         after = engine.analyse(board, limit)
-        played_score = mover_score(after["score"], mover)
+        played_score = score_after_move(after["score"], mover, board)
         loss = max(0, best_score - played_score)
         label = classify_loss(loss, thresholds)
         row = {

@@ -57,6 +57,13 @@ class Database:
             for key, value in DEFAULT_SETTINGS.items():
                 db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)", (key, json.dumps(value)))
 
+    def recover_interrupted_analyses(self):
+        with self.connect() as db:
+            db.execute("""UPDATE games
+                          SET analysis_status='not_started',
+                              analysis_error='Analysis was interrupted; start it again.'
+                          WHERE analysis_status IN ('queued','running')""")
+
     def get_settings(self, include_secret=False):
         with self.connect() as db:
             values = {row["key"]: json.loads(row["value"]) for row in db.execute("SELECT key,value FROM settings")}
@@ -69,7 +76,7 @@ class Database:
 
     def save_settings(self, settings: SettingsInput):
         values = settings.model_dump()
-        if values["ai_api_key"] == "********":
+        if values["ai_api_key"] in ("", "********"):
             values["ai_api_key"] = self.get_settings(include_secret=True).get("ai_api_key", "")
         with self.connect() as db:
             for key, value in values.items():
