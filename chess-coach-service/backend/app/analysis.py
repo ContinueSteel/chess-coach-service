@@ -48,7 +48,7 @@ def _pv_san(board: chess.Board, pv: list[chess.Move], maximum: int = 5) -> list[
 
 def pv_cues(board: chess.Board, pv: list[chess.Move]) -> list[dict]:
     copy = board.copy()
-    meanings = [("best", "Engine best move"), ("response", "Best response"), ("continuation", "PV continuation / threat")]
+    meanings = [("best", "Best"), ("response", "Expected reply"), ("continuation", "Continuation")]
     cues = []
     for move, (kind, label) in zip(pv[:3], meanings):
         if move not in copy.legal_moves:

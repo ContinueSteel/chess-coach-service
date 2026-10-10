@@ -7,6 +7,8 @@ services:
     environment:
       DATABASE_PATH: /data/chess-coach.db
       STOCKFISH_PATH: /usr/games/stockfish
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - chess_data:/data
     expose:

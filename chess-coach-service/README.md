@@ -19,7 +19,7 @@ Stop without deleting data with `docker compose down`; only `docker compose down
 - **Import:** paste/upload PGN or fetch 1–12 completed public Chess.com archive months.
 - **Review:** a completed game opens after White's first move. Left/right arrows navigate plies unless a form, dialog, or board drag has focus. The notation list groups White and Black under each full-move number.
 - **Orientation:** Chess.com imports infer the named player's color. Unknown PGNs expose a White/Black bottom override.
-- **Engine cues:** yellow = best move, blue = best response, red = PV continuation/threat. Every cue comes from a legal Stockfish PV and records its FEN context. Reanalyse v0.1 records to add cues.
+- **Engine cues:** selecting a played move shows its pre-move position; yellow = best move. Expected replies and continuations are listed with their exact later-PV FEN context rather than drawn illegally on the current board. Reanalyse v0.1 records to add cues.
 - **Trial moves:** move a piece from any reviewed position for non-mutating Stockfish evaluation and level-appropriate feedback.
 - **Puzzles:** solve by moving pieces. Hints state the side to move and use named files (for example, `f-file`).
 - **Annotations:** right-drag draws arrows and right-click highlights a square. On touch/mobile, enable **Annotate**, then tap start/end squares; tap one square twice to highlight it.
@@ -37,7 +37,7 @@ All ordinary configuration is browser-editable and persisted: coaching level, bo
 
 ## AI configuration
 
-AI is optional. Deterministic Stockfish coaching, analysis, trials, and puzzles work with it disabled. For chat/enhanced notes, select a local or OpenAI-compatible provider and set an HTTP(S) base URL plus model. Keys are masked in API responses and never sent to the browser after saving, but are stored unencrypted in the local SQLite volume. Null, empty, malformed, timed-out, or failed provider responses fall back per note and cannot fail game analysis.
+AI is optional. Deterministic Stockfish coaching, analysis, trials, and puzzles work with it disabled. For chat/enhanced notes, select a local or OpenAI-compatible provider and set an HTTP(S) base URL plus model. The default local endpoint is `http://host.docker.internal:11434/v1`; Compose maps that hostname to the Docker host gateway so it resolves on Linux as well as Docker Desktop. Keys are masked in API responses and never sent to the browser after saving, but are stored unencrypted in the local SQLite volume. Null, empty, malformed, timed-out, or failed provider responses fall back per note and cannot fail game analysis.
 
 ## Upgrade and backup
 
@@ -86,7 +86,8 @@ The E2E suite checks review keyboard navigation, settings, deletion, annotations
 ## Licensing and attribution
 
 - Application source: repository license.
-- `react-chessboard` 5.12.1: MIT, Ryan Gregory/Clariity; its bundled default SVG pieces are used locally by the compiled app.
+- `react-chessboard` 5.12.1: MIT, Ryan Gregory/Clariity.
+- Classic, Alpha, and Merida-inspired piece renderers in `frontend-react/src/pieces.tsx`: original simplified SVG geometry created for this application, locally bundled under the repository license. The style names describe the visual families; no third-party Alpha or Merida artwork is copied.
 - `chess.js` 1.4.0: BSD-2-Clause.
 - Stockfish: GPLv3, installed as a separate OS package and process in the backend image. See the distribution's Stockfish package/source offer obligations when redistributing images.
 - Move sounds are generated locally with the Web Audio API; no external audio asset or CDN is used.

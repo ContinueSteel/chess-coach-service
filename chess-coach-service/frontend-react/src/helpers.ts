@@ -1,4 +1,5 @@
 import type { Analysis, Game, Settings } from './types'
+import { Chess } from 'chess.js'
 
 export type FullMove = { number:number; white?:Analysis; black?:Analysis }
 
@@ -31,6 +32,25 @@ export function shouldHandleReviewKey(target:EventTarget|null):boolean{
 
 export function uciArrow(uci:string|undefined,color:string){
   return uci && uci.length>=4?{startSquare:uci.slice(0,2),endSquare:uci.slice(2,4),color}:null
+}
+
+export function moveResultUci(fen:string,source:string,target:string):{uci:string;fen:string}{
+  const game=new Chess(fen),result=game.move({from:source,to:target,promotion:'q'})
+  return {uci:`${result.from}${result.to}${result.promotion||''}`,fen:game.fen()}
+}
+
+const cueColors={best:'#e8b923',response:'#4ba3e3',continuation:'#e06b65'} as const
+
+export function reviewPosition(cursor:number,current:Analysis|undefined,fallback:string):string{
+  return cursor===0 ? fallback : current?.fen_before||fallback
+}
+
+export function engineArrowsForFen(cues:Analysis['cues']|undefined,fen:string){
+  const board=new Chess(fen)
+  return (cues||[]).filter(cue=>{
+    if(cue.fen!==fen)return false
+    try{return board.moves({verbose:true}).some(move=>`${move.from}${move.to}${move.promotion||''}`===cue.uci)}catch{return false}
+  }).map(cue=>uciArrow(cue.uci,cueColors[cue.kind])).filter(Boolean)
 }
 
 export const themes={

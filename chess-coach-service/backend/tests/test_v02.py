@@ -138,6 +138,8 @@ def test_analysis_has_legal_explicit_engine_cues_and_fullmove_fields():
     assert rows[1]["move_number"] == 1 and rows[1]["color"] == "black"
     cues = rows[0]["cues"]
     assert [cue["kind"] for cue in cues] == ["best", "response", "continuation"]
+    assert [cue["label"] for cue in cues] == ["Best", "Expected reply", "Continuation"]
+    assert all("threat" not in cue["label"].lower() for cue in cues)
     board = chess.Board(rows[0]["fen_before"])
     for cue in cues:
         move = chess.Move.from_uci(cue["uci"])
@@ -157,6 +159,10 @@ def test_trial_valid_invalid_and_nonmutating(tmp_path):
         assert body["feedback"].startswith(("Nice", "Good", "Let's", "That"))
         assert client.get("/games").json()["total"] == before
         assert client.post("/positions/evaluate-trial", json={"fen": fen, "move": "e2e5", "coach_level": "advanced"}).status_code == 422
+        promotion_fen = "8/P7/8/8/8/8/7k/5K2 w - - 0 1"
+        promoted = client.post("/positions/evaluate-trial", json={"fen": promotion_fen, "move": "a7a8q", "coach_level": "intermediate"})
+        assert promoted.status_code == 200
+        assert promoted.json()["move_uci"] == "a7a8q"
 
 
 def test_chat_disabled_and_context_is_server_derived(tmp_path, monkeypatch):
