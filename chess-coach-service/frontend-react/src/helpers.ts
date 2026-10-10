@@ -37,3 +37,11 @@ export const themes={
   green:{light:'#eeeed2',dark:'#769656'},brown:{light:'#f0d9b5',dark:'#b58863'},
   blue:{light:'#dee3e6',dark:'#8ca2ad'},purple:{light:'#e7d9f2',dark:'#806a9d'}
 } as const
+
+export function pieceSetStyle(pieceSet:Settings['piece_set']):React.CSSProperties{
+  return {
+    classic:{fontFamily:'Georgia, serif',fontWeight:400},
+    alpha:{fontFamily:'Arial Black, sans-serif',fontWeight:900},
+    merida:{fontFamily:'Times New Roman, serif',fontWeight:700},
+  }[pieceSet]
+}

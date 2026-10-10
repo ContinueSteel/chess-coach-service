@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest'
-import {groupFullMoves,initialReviewCursor,orientationFor,shouldHandleReviewKey,uciArrow} from './helpers'
+import {groupFullMoves,initialReviewCursor,orientationFor,pieceSetStyle,shouldHandleReviewKey,uciArrow} from './helpers'
 import type {Analysis,Game,Settings} from './types'
 
 const row=(ply:number,color:'white'|'black',move_number:number):Analysis=>({ply,color,move_number,san:'e4',fen_before:'',fen_after:'',eval_cp:0,loss_cp:0,classification:'best',best_move_uci:'e2e4',best_move_san:'e4',pv:[],coach:''})
@@ -12,4 +12,5 @@ describe('review helpers',()=>{
  it('puts player color at bottom and honors override',()=>{expect(orientationFor(game,settings)).toBe('black');expect(orientationFor(game,settings,'white')).toBe('white')})
  it('ignores keyboard navigation in form controls',()=>{const input=document.createElement('input');expect(shouldHandleReviewKey(input)).toBe(false);expect(shouldHandleReviewKey(document.body)).toBe(true)})
  it('turns legal UCI-shaped strings into arrows',()=>expect(uciArrow('e2e4','#fff')).toEqual({startSquare:'e2',endSquare:'e4',color:'#fff'}))
+ it('maps each piece-set preference to a distinct local style',()=>expect(new Set(['classic','alpha','merida'].map(x=>pieceSetStyle(x as Settings['piece_set']).fontFamily)).size).toBe(3))
 })
