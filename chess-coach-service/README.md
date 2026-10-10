@@ -62,7 +62,7 @@ v0.2 uses versioned, idempotent SQLite migration (`PRAGMA user_version=2`). Star
 cd backend
 python3.12 -m venv .venv-v02
 .venv-v02/bin/pip install -r requirements-dev.txt pip-audit
-.venv-v02/bin/pytest -q
+.venv-v02/bin/python -m pytest -q
 .venv-v02/bin/pip-audit -r requirements.txt
 
 # Frontend
