@@ -1,0 +1,14 @@
+.env
+*.db
+*.sqlite*
+*.log
+.DS_Store
+__pycache__/
+.pytest_cache/
+.venv/
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+home/
+chess-coach-service/

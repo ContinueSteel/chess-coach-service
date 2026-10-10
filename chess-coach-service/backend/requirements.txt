@@ -1,5 +1,6 @@
-fastapi
-uvicorn[standard]
-python-chess
-stockfish
-openai
+fastapi==0.143.0
+uvicorn[standard]==0.38.0
+python-chess==1.999
+httpx==0.28.1
+python-multipart==0.0.31
+pydantic==2.12.5

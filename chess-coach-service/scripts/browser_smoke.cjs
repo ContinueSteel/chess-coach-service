@@ -1,0 +1,24 @@
+const { chromium } = require('playwright');
+(async () => {
+  const errors = [];
+  const failed = [];
+  const browser = await chromium.launch({headless:true});
+  const page = await browser.newPage({viewport:{width:1440,height:1000}});
+  page.on('console', m => { if (m.type()==='error') errors.push(m.text()) });
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('requestfailed', r => failed.push(`${r.url()} ${r.failure()?.errorText}`));
+  const response = await page.goto('http://127.0.0.1:18082', {waitUntil:'networkidle'});
+  if (!response?.ok()) throw new Error(`root status ${response?.status()}`);
+  await page.getByRole('heading', {name:'Your training room'}).waitFor();
+  await page.getByRole('button', {name:'Settings'}).click();
+  await page.getByRole('heading', {name:'Coach settings'}).waitFor();
+  await page.getByRole('button', {name:'Import'}).click();
+  await page.getByRole('heading', {name:'Import PGN'}).waitFor();
+  const health = await page.evaluate(() => fetch('/api/health').then(r=>r.json()));
+  if (health.status !== 'ok') throw new Error('bad health');
+  const controls = await page.locator('button,input,textarea,select').count();
+  if (controls < 10) throw new Error(`too few controls: ${controls}`);
+  if (errors.length || failed.length) throw new Error(JSON.stringify({errors,failed}));
+  console.log(JSON.stringify({title:await page.title(),controls,health,consoleErrors:0,failedResources:0}));
+  await browser.close();
+})().catch(e => { console.error(e); process.exit(1) });

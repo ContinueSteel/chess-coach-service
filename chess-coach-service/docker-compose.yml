@@ -1,0 +1,41 @@
+name: chess-coach
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_PATH: /data/chess-coach.db
+      STOCKFISH_PATH: /usr/games/stockfish
+    volumes:
+      - chess_data:/data
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/ready"]
+      interval: 10s
+      timeout: 4s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  frontend:
+    build: ./frontend-react
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${CHESS_COACH_PORT:-8081}:80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  chess_data:
