@@ -21,7 +21,7 @@ test('import review keyboard annotations settings and deletion',async({page})=>{
  await page.keyboard.press('ArrowRight');await expect(page.getByTestId('review-cursor')).toContainText('Move 1…')
  await page.getByTestId('annotation-mode').click();await expect(page.getByTestId('annotation-mode')).toHaveText('Annotating')
  await page.getByRole('button',{name:'settings',exact:true}).click();await page.getByLabel('Coach level').selectOption('beginner');await page.getByLabel('Board colors').selectOption('blue');await page.getByTestId('save-settings').click();await expect(page.getByRole('status')).toContainText('Settings saved')
- await page.getByRole('button',{name:'games',exact:true}).click();await page.getByText('Alice').click();page.on('dialog',d=>d.accept());await page.getByTestId('delete-game').click();await expect(page.getByText('Game deleted')).toBeVisible()
+ await page.getByRole('button',{name:'games',exact:true}).click();await page.getByRole('button',{name:/Alice vs Bob/}).first().click();page.on('dialog',d=>d.accept());await page.getByTestId('delete-game').click();await expect(page.getByText('Game deleted')).toBeVisible()
  expect(errors).toEqual([])
 })
 
