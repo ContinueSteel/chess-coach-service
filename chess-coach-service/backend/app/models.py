@@ -3,6 +3,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+CoachLevel = Literal["beginner", "intermediate", "advanced"]
+PlayerColor = Literal["white", "black", "unknown"]
+
 
 class Thresholds(BaseModel):
     inaccuracy: int = Field(50, ge=1, le=1000)
@@ -32,6 +35,13 @@ class SettingsInput(BaseModel):
     ai_base_url: str = Field("", max_length=500)
     ai_model: str = Field("", max_length=200)
     ai_api_key: str = Field("", max_length=500)
+    coach_level: CoachLevel = "intermediate"
+    board_theme: Literal["green", "brown", "blue", "purple"] = "green"
+    piece_set: Literal["classic", "alpha", "merida"] = "classic"
+    show_coordinates: bool = True
+    orientation_mode: Literal["player", "white", "black"] = "player"
+    move_sounds_enabled: bool = True
+    sound_volume: float = Field(0.55, ge=0, le=1)
 
     @model_validator(mode="after")
     def validate_settings(self):
@@ -58,6 +68,27 @@ class MoveInput(BaseModel):
 class PositionMove(BaseModel):
     fen: str = Field(min_length=1, max_length=200)
     move: str = Field(min_length=2, max_length=12)
+
+
+class TrialInput(PositionMove):
+    coach_level: CoachLevel = "intermediate"
+
+
+class OrientationInput(BaseModel):
+    player_color: PlayerColor
+
+
+class ChatInput(BaseModel):
+    ply: int = Field(ge=0, le=1000)
+    question: str = Field(min_length=2, max_length=1000)
+
+    @field_validator("question")
+    @classmethod
+    def strip_question(cls, value: str):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("question is too short")
+        return value
 
 
 @dataclass

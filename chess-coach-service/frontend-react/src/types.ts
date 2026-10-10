@@ -1,0 +1,7 @@
+export type View='dashboard'|'import'|'games'|'puzzles'|'trainer'|'settings'
+export type Cue={kind:'best'|'response'|'continuation';label:string;uci:string;san:string;fen:string}
+export type Analysis={ply:number;move_number:number;color:'white'|'black';san:string;fen_before:string;fen_after:string;eval_cp:number;loss_cp:number;classification:string;best_move_uci:string;best_move_san:string;pv:string[];cues?:Cue[];coach:string}
+export type Game={id:number;white:string;black:string;result:string;played_at:string;source:string;analysis_status:string;ply_count:number;player_color:'white'|'black'|'unknown';pgn?:string;analysis?:Analysis[];puzzle_count?:number;analysis_error?:string}
+export type Puzzle={id:number;game_id:number;move_ply:number;fen:string;attempts:number;solved:number}
+export type Settings={chesscom_username:string;analysis_depth:number;analysis_time_ms:number;inaccuracy_threshold:number;mistake_threshold:number;blunder_threshold:number;puzzle_threshold:number;ai_provider:string;ai_base_url:string;ai_model:string;ai_api_key:string;ai_api_key_configured?:boolean;coach_level:'beginner'|'intermediate'|'advanced';board_theme:'green'|'brown'|'blue'|'purple';piece_set:'classic'|'alpha'|'merida';show_coordinates:boolean;orientation_mode:'player'|'white'|'black';move_sounds_enabled:boolean;sound_volume:number}
+export type Trial={move_uci:string;move_san:string;fen_after:string;loss_cp:number;classification:string;best_move_san:string;feedback:string;cues:Cue[]}

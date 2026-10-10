@@ -1,111 +1,106 @@
-# Chess Coach
+# Chess Coach 0.2.0
 
-A private, browser-first chess training MVP. Import completed Chess.com games or PGN files, analyse every move with Stockfish, review mover-relative evaluations, and solve puzzles generated from positions before your mistakes. Optional OpenAI-compatible commentary never blocks deterministic engine coaching.
+A private, browser-first chess training application. It imports PGNs and recent public Chess.com games, analyses every move with local Stockfish, supports interactive review/trials/puzzles, and keeps settings and history in SQLite. Optional OpenAI-compatible text coaching never blocks engine analysis.
 
-## Start from a clean clone
+## Run
 
-Requirements: Docker Engine with Compose v2.
+Requirements: Docker Engine and Compose v2.
 
 ```bash
-git clone https://github.com/ContinueSteel/chess-coach-service.git
-cd chess-coach-service/chess-coach-service
 cp .env.example .env
 docker compose up --build -d
 ```
 
-Open **http://localhost:8081**. The same nginx origin serves the UI and `/api`; the backend has no host port.
+Open **http://localhost:8081**. Health: `curl -fsS http://localhost:8081/api/ready`.
+Stop without deleting data with `docker compose down`; only `docker compose down -v` deletes the database volume.
 
-Health checks:
+## Browser controls
+
+- **Import:** paste/upload PGN or fetch 1–12 completed public Chess.com archive months.
+- **Review:** a completed game opens after White's first move. Left/right arrows navigate plies unless a form, dialog, or board drag has focus. The notation list groups White and Black under each full-move number.
+- **Orientation:** Chess.com imports infer the named player's color. Unknown PGNs expose a White/Black bottom override.
+- **Engine cues:** yellow = best move, blue = best response, red = PV continuation/threat. Every cue comes from a legal Stockfish PV and records its FEN context. Reanalyse v0.1 records to add cues.
+- **Trial moves:** move a piece from any reviewed position for non-mutating Stockfish evaluation and level-appropriate feedback.
+- **Puzzles:** solve by moving pieces. Hints state the side to move and use named files (for example, `f-file`).
+- **Annotations:** right-drag draws arrows and right-click highlights a square. On touch/mobile, enable **Annotate**, then tap start/end squares; tap one square twice to highlight it.
+- **Trainer:** move a piece and type its coordinate notation.
+- **Sounds:** local Web Audio move click; enable/disable and set volume in Settings.
+- **Chat:** asks bounded position/game questions using server-derived canonical PGN, FEN, and Stockfish data. The UI gives a structured unavailable state while AI is disabled.
+
+All ordinary configuration is browser-editable and persisted: coaching level, board colors, piece style preference, coordinates, orientation, sound, engine limits/thresholds, Chess.com username, and optional text provider.
+
+### Coaching levels
+
+- **Beginner:** plain language and one core concept.
+- **Intermediate:** plans plus an accessible concrete line.
+- **Advanced:** titled-player-oriented candidate moves, calculation, and stable endpoints. It does not claim the model or application has title-level authority.
+
+## AI configuration
+
+AI is optional. Deterministic Stockfish coaching, analysis, trials, and puzzles work with it disabled. For chat/enhanced notes, select a local or OpenAI-compatible provider and set an HTTP(S) base URL plus model. Keys are masked in API responses and never sent to the browser after saving, but are stored unencrypted in the local SQLite volume. Null, empty, malformed, timed-out, or failed provider responses fall back per note and cannot fail game analysis.
+
+## Upgrade and backup
+
+v0.2 uses versioned, idempotent SQLite migration (`PRAGMA user_version=2`). Startup upgrades a v0.1 database by adding `games.player_color`, `coach_messages`, and new setting rows without deleting games, analysis, puzzles, or attempts.
 
 ```bash
-curl -fsS http://localhost:8081/api/health
-curl -fsS http://localhost:8081/api/ready
+# Backup consistently
+ docker compose down
+ docker run --rm -v chess-coach_chess_data:/data -v "$PWD:/backup" alpine \
+   tar czf /backup/chess-coach-backup.tgz -C /data .
+ docker compose up -d
+
+# Upgrade after backup
+ git checkout <0.2 revision>
+ docker compose up --build -d
 ```
 
-Stop without deleting data: `docker compose down`. Delete all data only when intended: `docker compose down -v`.
-
-## Browser workflow
-
-1. **Settings:** choose depth (6–24) or a per-move time limit, configure loss/puzzle thresholds, and optionally configure a local or OpenAI-compatible model.
-2. **Import:** paste one or multiple PGNs, upload a `.pgn` file (2 MB maximum), or fetch 1–12 recent public Chess.com archive months.
-3. **Games:** open a persisted game and start analysis. The worker is bounded to one game at a time; poll status remains responsive.
-4. **Review:** navigate positions and see the played move, mover-relative centipawn loss, engine choice, PV, classification, and deterministic coach note.
-5. **Puzzles:** generated positions start before a qualifying mistake. Enter legal UCI (`e2e4`) or SAN (`Nf3`), request progressive hints, and persist attempts.
-
-Classifications are explicit and testable: loss `0` = best, `<20` = great, below the configured inaccuracy threshold = good, then inaccuracy/mistake/blunder at configured thresholds. Mate scores use ±100,000. The app deliberately does not claim moves are “brilliant.”
-
-## Configuration
-
-`CHESS_COACH_PORT` in `.env` selects the public frontend port (default `8081`). User settings live in SQLite and are editable in the UI:
-
-- Chess.com username and archive month bound
-- Stockfish depth or time per move
-- inaccuracy, mistake, blunder, and puzzle centipawn thresholds
-- AI provider: disabled, local, or OpenAI-compatible base URL/model/API key
-
-The API key is masked in API responses and never logged. It is stored unencrypted in the local SQLite volume. Engine analysis and coaching work with AI disabled. A failed AI request falls back to engine commentary.
-
-## Development and tests
-
-Backend (the container command avoids host Python-version differences):
+## Development and release gates
 
 ```bash
-docker run --rm -v "$PWD/backend:/work" -w /work python:3.12-slim sh -c \
-  "pip install -r requirements-dev.txt && PYTHONPATH=. pytest -q"
-```
+# Backend
+cd backend
+python3.12 -m venv .venv-v02
+.venv-v02/bin/pip install -r requirements-dev.txt pip-audit
+.venv-v02/bin/pytest -q
+.venv-v02/bin/pip-audit -r requirements.txt
 
-Frontend:
-
-```bash
-cd frontend-react
+# Frontend
+cd ../frontend-react
 npm ci
+npm test
 npm run typecheck
 npm run build
 npm audit --audit-level=high
+
+# E2E with bundled Chromium container (candidate on port 18082)
+cd ..
+CHESS_COACH_PORT=18082 docker compose -p chess-coach-v02 up --build -d
+docker run --rm -v "$PWD:/work" -w /work --network host \
+  mcr.microsoft.com/playwright:v1.57.0-noble bash -lc \
+  'npm --prefix frontend-react ci >/dev/null && frontend-react/node_modules/.bin/playwright test --config=playwright.config.ts'
 ```
 
-Full deterministic release smoke:
+The E2E suite checks review keyboard navigation, settings, deletion, annotations, puzzle board mode, browser errors, and square board geometry at 320, 375, 600, 768, 900, 1024, and 1440 px.
 
-```bash
-./scripts/smoke.sh
-```
+## Licensing and attribution
 
-It performs a clean Compose build, checks UI/API health, round-trips settings, ingests and analyses a tactical fixture with real Stockfish, exercises puzzle hints/attempts, recreates containers, and verifies SQLite persistence.
+- Application source: repository license.
+- `react-chessboard` 5.12.1: MIT, Ryan Gregory/Clariity; its bundled default SVG pieces are used locally by the compiled app.
+- `chess.js` 1.4.0: BSD-2-Clause.
+- Stockfish: GPLv3, installed as a separate OS package and process in the backend image. See the distribution's Stockfish package/source offer obligations when redistributing images.
+- Move sounds are generated locally with the Web Audio API; no external audio asset or CDN is used.
 
-## Backup and upgrade
+## Security scope
 
-The named volume is `chess-coach_chess_data` under the default Compose project name.
+This is a **single-user application with no authentication or TLS**. Nginx is the only published Compose service, but anyone who can reach it can access chess data and settings. Before untrusted-network exposure, add authenticated TLS at a reverse proxy/VPN, restrict network access, protect backups, and move provider secrets to a secrets manager.
 
-```bash
-# Consistent backup (brief stop)
-docker compose down
-docker run --rm -v chess-coach_chess_data:/data -v "$PWD:/backup" alpine \
-  tar czf /backup/chess-coach-backup.tgz -C /data .
-docker compose up -d
+## API highlights
 
-# Restore into an empty volume
-docker compose down -v
-docker volume create chess-coach_chess_data
-docker run --rm -v chess-coach_chess_data:/data -v "$PWD:/backup" alpine \
-  tar xzf /backup/chess-coach-backup.tgz -C /data
-docker compose up -d
-```
+FastAPI docs: `/api/docs`. Main routes: `/api/settings`, `/api/games`, `/api/games/{id}/analysis`, `DELETE /api/games/{id}`, `/api/puzzles`, `/api/positions/evaluate-trial`, and `/api/games/{id}/chat`.
 
-For an upgrade, take a backup, pull the target revision, then run `docker compose up --build -d`. Schema creation is additive for this MVP.
+## Deliberate limits
 
-## Security and publication
-
-This is a **single-user application with no authentication**. The backend is internal to Compose and only nginx publishes a port, but the UI exposes all local chess data and settings to anyone who can reach it. Before exposing it to the untrusted internet, put it behind TLS and authentication (for example, an authenticated reverse proxy or VPN), restrict network access, use a secrets manager for AI keys, and establish backups. Do not commit `.env`, database files, or real credentials.
-
-Chess.com imports use the documented public archives endpoint with an identifying User-Agent. Replace the placeholder contact in `backend/app/chesscom.py` with a real operational contact before a broad public deployment.
-
-## API
-
-FastAPI documentation is available internally through `http://localhost:8081/api/docs`. Important endpoints include `/api/settings`, `/api/games`, `/api/games/import-pgn`, `/api/games/upload`, `/api/games/import-chesscom`, `/api/games/{id}/analysis`, and `/api/puzzles`.
-
-## Known MVP limits
-
-- One in-process analysis worker; queued work does not survive an abrupt process kill, though game data does.
-- No accounts, auth, TLS, cloud object storage, or multi-user isolation.
-- Puzzle verification checks the engine's first move rather than a full forced line.
-- AI configuration is optional; up to ten significant mistakes per analysis receive AI-enhanced notes when configured, with deterministic fallback on any provider failure.
+- One in-process analysis worker and bounded synchronous interactive engine work; queued jobs do not survive abrupt process death (interrupted state is made restartable).
+- Puzzle checking validates Stockfish's first move, not a complete forced line.
+- No accounts, multi-user isolation, auth, or TLS.

@@ -20,7 +20,13 @@ class ChessComClient:
             raise ValueError(f"Chess.com player '{username}' was not found")
         if response.status_code != 200:
             raise ValueError(f"Chess.com returned HTTP {response.status_code}")
-        archives = response.json().get("archives", [])[-months:]
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise ValueError("Chess.com returned malformed archive data") from exc
+        if not isinstance(body, dict) or not isinstance(body.get("archives"), list):
+            raise ValueError("Chess.com returned malformed archive data")
+        archives = [item for item in body["archives"] if isinstance(item, str) and item.startswith("https://api.chess.com/")][-months:]
         games: list[str] = []
         for archive in archives:
             try:
@@ -29,8 +35,15 @@ class ChessComClient:
                 raise ValueError(f"Chess.com archive request failed: {exc}") from exc
             if month_response.status_code != 200:
                 raise ValueError(f"Chess.com archive returned HTTP {month_response.status_code}")
-            for game in month_response.json().get("games", []):
-                pgn = game.get("pgn")
-                if pgn:
+            try:
+                month_body = month_response.json()
+            except ValueError as exc:
+                raise ValueError("Chess.com returned malformed game data") from exc
+            records = month_body.get("games", []) if isinstance(month_body, dict) else []
+            if not isinstance(records, list):
+                raise ValueError("Chess.com returned malformed game data")
+            for game in records:
+                pgn = game.get("pgn") if isinstance(game, dict) else None
+                if isinstance(pgn, str) and pgn.strip():
                     games.append(pgn)
         return games

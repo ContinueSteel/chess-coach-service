@@ -3,6 +3,7 @@ import hashlib
 import io
 import os
 import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
@@ -11,16 +12,37 @@ import chess.engine
 import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, Response
 
-from .analysis import analyse_game
-from .ai import improve_commentary
+from .analysis import analyse_game, evaluate_trial
+from .ai import answer_question, improve_commentary
 from .chesscom import ChessComClient
 from .database import Database
-from .models import ChessComImport, MoveInput, PgnInput, PositionMove, SettingsInput, Thresholds
+from .models import (ChatInput, ChessComImport, MoveInput, OrientationInput, PgnInput,
+                     PositionMove, SettingsInput, Thresholds, TrialInput)
 from .pgn import parse_pgn_games
 
 MAX_UPLOAD = 2_000_000
+
+
+def run_coroutine_blocking(coro):
+    """Run async provider work from either a worker or inline test loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    result = []
+    failure = []
+    def target():
+        try:
+            result.append(asyncio.run(coro))
+        except BaseException as exc:
+            failure.append(exc)
+    thread = threading.Thread(target=target, daemon=True)
+    thread.start(); thread.join()
+    if failure:
+        raise failure[0]
+    return result[0] if result else None
 
 
 def error(status: int, code: str, message: str):
@@ -43,7 +65,7 @@ def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine
 
     application = FastAPI(
         title="Chess Coach API",
-        version="1.0.0",
+        version="0.2.0",
         lifespan=lifespan,
         root_path="/api",
     )
@@ -86,7 +108,7 @@ def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine
     def put_settings(settings: SettingsInput):
         return database.save_settings(settings)
 
-    def import_text(text: str, source: str, source_prefix: str = ""):
+    def import_text(text: str, source: str, source_prefix: str = "", player_name: str = ""):
         try:
             games = parse_pgn_games(text)
         except (ValueError, UnicodeError) as exc:
@@ -95,7 +117,13 @@ def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine
         for index, game in enumerate(games):
             digest = hashlib.sha256(game.pgn.encode()).hexdigest()
             source_key = f"{source_prefix}:{index}:{digest}" if source_prefix else None
-            game_id = database.add_game(game, source=source, source_key=source_key)
+            player_color = "unknown"
+            if player_name:
+                if game.white.casefold() == player_name.casefold():
+                    player_color = "white"
+                elif game.black.casefold() == player_name.casefold():
+                    player_color = "black"
+            game_id = database.add_game(game, source=source, source_key=source_key, player_color=player_color)
             if game_id:
                 added.append({"id": game_id, "white": game.white, "black": game.black, "result": game.result})
         return {"imported": len(added), "games": added}
@@ -125,7 +153,7 @@ def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine
         rejected = 0
         for pgn in pgns:
             try:
-                result = import_text(pgn, "chess.com", payload.username.lower())
+                result = import_text(pgn, "chess.com", payload.username.lower(), payload.username)
                 imported.extend(result["games"])
             except HTTPException:
                 rejected += 1
@@ -143,6 +171,18 @@ def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine
             raise HTTPException(404, {"code": "not_found", "message": "Game not found"})
         return game
 
+    @application.delete("/games/{game_id}", status_code=204)
+    def delete_game(game_id: int):
+        if not database.delete_game(game_id):
+            raise HTTPException(404, {"code": "not_found", "message": "Game not found"})
+        return Response(status_code=204)
+
+    @application.patch("/games/{game_id}/orientation")
+    def set_orientation(game_id: int, payload: OrientationInput):
+        if not database.set_player_color(game_id, payload.player_color):
+            raise HTTPException(404, {"code": "not_found", "message": "Game not found"})
+        return database.get_game(game_id)
+
     def run_analysis(game_id: int):
         game_row = database.get_game(game_id)
         if not game_row:
@@ -157,14 +197,16 @@ def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine
             engine = make_engine()
             if engine is None:
                 raise RuntimeError("Stockfish engine is unavailable")
-            rows, puzzles = analyse_game(game, engine, settings["analysis_depth"], settings["analysis_time_ms"], thresholds)
+            rows, puzzles = analyse_game(game, engine, settings["analysis_depth"], settings["analysis_time_ms"], thresholds,
+                                         settings["coach_level"])
             if settings["ai_provider"] != "disabled":
                 async def add_ai_notes():
                     candidates = [row for row in rows if row["classification"] in ("inaccuracy", "mistake", "blunder")][:10]
-                    notes = await asyncio.gather(*(improve_commentary(settings, row) for row in candidates))
+                    notes = await asyncio.gather(*(improve_commentary(settings, row) for row in candidates), return_exceptions=True)
                     for row, note in zip(candidates, notes):
-                        row["coach"] = note
-                asyncio.run(add_ai_notes())
+                        if isinstance(note, str) and note.strip():
+                            row["coach"] = note
+                run_coroutine_blocking(add_ai_notes())
             database.save_analysis(game_id, rows, puzzles)
         except Exception as exc:
             database.set_analysis_status(game_id, "failed", str(exc)[:500])
@@ -209,8 +251,10 @@ def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine
         updated = database.increment_hint(puzzle_id)
         level = updated["hint_level"]
         move = chess.Move.from_uci(updated["solution_uci"])
-        hints = [f"Look for a move with the piece on {chess.square_name(move.from_square)}.",
-                 f"The destination square is on the {chess.square_file(move.to_square) + 1} file.",
+        side = "White" if chess.Board(updated["fen"]).turn else "Black"
+        file_name = chess.FILE_NAMES[chess.square_file(move.to_square)]
+        hints = [f"{side} to move. Look for a forcing move with the piece on {chess.square_name(move.from_square)}.",
+                 f"The destination is on the {file_name}-file; check captures, checks, and threats there.",
                  f"The move is {updated['solution_san']}." ]
         return {"level": level, "hint": hints[level - 1]}
 
@@ -239,6 +283,48 @@ def create_app(db_path: str | None = None, run_jobs_inline: bool = False, engine
         except ValueError as exc:
             raise HTTPException(422, {"code": "invalid_position", "message": str(exc)}) from exc
         return {"legal": move in board.legal_moves, "uci": move.uci()}
+
+    @application.post("/positions/evaluate-trial")
+    def trial_position(payload: TrialInput):
+        try:
+            board = chess.Board(payload.fen)
+            move = board.parse_uci(payload.move) if len(payload.move) in (4, 5) else board.parse_san(payload.move)
+        except ValueError as exc:
+            raise HTTPException(422, {"code": "invalid_trial", "message": "Move is not legal in this position"}) from exc
+        settings = database.get_settings(include_secret=True)
+        thresholds = Thresholds(inaccuracy=settings["inaccuracy_threshold"], mistake=settings["mistake_threshold"],
+                                blunder=settings["blunder_threshold"], puzzle=settings["puzzle_threshold"])
+        engine = None
+        try:
+            engine = make_engine()
+            if engine is None:
+                raise HTTPException(503, {"code": "engine_unavailable", "message": "Stockfish is unavailable"})
+            return evaluate_trial(board, move, engine, settings["analysis_depth"], settings["analysis_time_ms"],
+                                  thresholds, payload.coach_level)
+        finally:
+            if engine is not None:
+                try: engine.quit()
+                except Exception: pass
+
+    @application.post("/games/{game_id}/chat")
+    async def chat(game_id: int, payload: ChatInput):
+        game = database.get_game(game_id)
+        if not game:
+            raise HTTPException(404, {"code": "not_found", "message": "Game not found"})
+        settings = database.get_settings(include_secret=True)
+        if settings["ai_provider"] == "disabled" or not settings.get("ai_model"):
+            raise HTTPException(503, {"code": "chat_unavailable", "message": "Configure an AI provider in Settings to use contextual chat."})
+        if payload.ply > game["ply_count"]:
+            raise HTTPException(422, {"code": "invalid_ply", "message": "Ply is outside this game"})
+        row = next((r for r in game["analysis"] if r.get("ply") == payload.ply), None)
+        context = {"pgn": game["pgn"], "ply": payload.ply,
+                   "fen": row.get("fen_after") if row else (game["analysis"][0]["fen_before"] if game["analysis"] else None),
+                   "stockfish": row}
+        answer = await answer_question(settings, context, payload.question)
+        if not answer:
+            raise HTTPException(503, {"code": "chat_unavailable", "message": "The configured coach provider did not return an answer."})
+        database.save_coach_message(game_id, payload.ply, payload.question, answer)
+        return {"answer": answer, "ply": payload.ply}
 
     return application
 

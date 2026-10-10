@@ -8,6 +8,7 @@ from pathlib import Path
 from .models import ParsedGame, SettingsInput
 
 DEFAULT_SETTINGS = SettingsInput().model_dump()
+SCHEMA_VERSION = 2
 
 
 class Database:
@@ -28,7 +29,7 @@ class Database:
             connection.close()
 
     def init(self):
-        with self.connect() as db:
+        with self._lock, self.connect() as db:
             db.executescript("""
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -36,7 +37,7 @@ class Database:
               id INTEGER PRIMARY KEY, source TEXT NOT NULL, source_key TEXT,
               pgn TEXT NOT NULL, event TEXT, site TEXT, played_at TEXT, white TEXT, black TEXT,
               result TEXT, ply_count INTEGER NOT NULL, analysis_status TEXT NOT NULL DEFAULT 'not_started',
-              analysis_error TEXT, created_at TEXT NOT NULL,
+              analysis_error TEXT, created_at TEXT NOT NULL, player_color TEXT NOT NULL DEFAULT 'unknown',
               UNIQUE(source, source_key)
             );
             CREATE TABLE IF NOT EXISTS move_analysis (
@@ -53,15 +54,22 @@ class Database:
               id INTEGER PRIMARY KEY, puzzle_id INTEGER NOT NULL REFERENCES puzzles(id) ON DELETE CASCADE,
               move TEXT NOT NULL, correct INTEGER NOT NULL, created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS coach_messages (
+              id INTEGER PRIMARY KEY, game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+              ply INTEGER NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, created_at TEXT NOT NULL
+            );
             """)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(games)")}
+            if "player_color" not in columns:
+                db.execute("ALTER TABLE games ADD COLUMN player_color TEXT NOT NULL DEFAULT 'unknown'")
             for key, value in DEFAULT_SETTINGS.items():
                 db.execute("INSERT OR IGNORE INTO settings(key,value) VALUES (?,?)", (key, json.dumps(value)))
+            db.execute("PRAGMA user_version=2")
 
     def recover_interrupted_analyses(self):
         with self.connect() as db:
-            db.execute("""UPDATE games
-                          SET analysis_status='not_started',
-                              analysis_error='Analysis was interrupted; start it again.'
+            db.execute("""UPDATE games SET analysis_status='not_started',
+                          analysis_error='Analysis was interrupted; start it again.'
                           WHERE analysis_status IN ('queued','running')""")
 
     def get_settings(self, include_secret=False):
@@ -83,25 +91,21 @@ class Database:
                 db.execute("INSERT INTO settings(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, json.dumps(value)))
         return self.get_settings()
 
-    def add_game(self, game: ParsedGame, source="upload", source_key=None):
+    def add_game(self, game: ParsedGame, source="upload", source_key=None, player_color="unknown"):
         now = datetime.now(timezone.utc).isoformat()
         with self.connect() as db:
             cur = db.execute("""INSERT OR IGNORE INTO games
-              (source,source_key,pgn,event,site,played_at,white,black,result,ply_count,created_at)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?)""", (source, source_key, game.pgn, game.event, game.site, game.played_at,
-                game.white, game.black, game.result, game.ply_count, now))
+              (source,source_key,pgn,event,site,played_at,white,black,result,ply_count,created_at,player_color)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (source, source_key, game.pgn, game.event, game.site, game.played_at,
+                game.white, game.black, game.result, game.ply_count, now, player_color))
             if cur.lastrowid:
                 return cur.lastrowid
             row = db.execute("SELECT id FROM games WHERE source=? AND source_key=?", (source, source_key)).fetchone()
             return row["id"] if row else None
 
-    @staticmethod
-    def _game(row):
-        return dict(row) if row else None
-
     def list_games(self):
         with self.connect() as db:
-            rows = db.execute("SELECT id,source,event,site,played_at,white,black,result,ply_count,analysis_status,created_at FROM games ORDER BY id DESC").fetchall()
+            rows = db.execute("SELECT id,source,event,site,played_at,white,black,result,ply_count,analysis_status,created_at,player_color FROM games ORDER BY id DESC").fetchall()
         return [dict(row) for row in rows]
 
     def get_game(self, game_id):
@@ -115,12 +119,25 @@ class Database:
             game["puzzle_count"] = db.execute("SELECT COUNT(*) n FROM puzzles WHERE game_id=?", (game_id,)).fetchone()["n"]
         return game
 
+    def set_player_color(self, game_id, color):
+        with self.connect() as db:
+            result = db.execute("UPDATE games SET player_color=? WHERE id=?", (color, game_id))
+            return result.rowcount > 0
+
+    def delete_game(self, game_id):
+        with self._lock, self.connect() as db:
+            result = db.execute("DELETE FROM games WHERE id=?", (game_id,))
+            return result.rowcount > 0
+
     def set_analysis_status(self, game_id, status, error=None):
         with self.connect() as db:
-            db.execute("UPDATE games SET analysis_status=?, analysis_error=? WHERE id=?", (status, error, game_id))
+            result = db.execute("UPDATE games SET analysis_status=?, analysis_error=? WHERE id=?", (status, error, game_id))
+            return result.rowcount > 0
 
     def save_analysis(self, game_id, rows, puzzles):
-        with self.connect() as db:
+        with self._lock, self.connect() as db:
+            if not db.execute("SELECT 1 FROM games WHERE id=?", (game_id,)).fetchone():
+                return False
             db.execute("DELETE FROM move_analysis WHERE game_id=?", (game_id,))
             db.execute("DELETE FROM puzzles WHERE game_id=?", (game_id,))
             db.executemany("INSERT INTO move_analysis(game_id,ply,data) VALUES (?,?,?)",
@@ -129,6 +146,7 @@ class Database:
             db.executemany("INSERT INTO puzzles(game_id,move_ply,fen,solution_uci,solution_san,created_at) VALUES (?,?,?,?,?,?)",
                            [(game_id, p["move_ply"], p["fen"], p["solution_uci"], p["solution_san"], now) for p in puzzles])
             db.execute("UPDATE games SET analysis_status='complete', analysis_error=NULL WHERE id=?", (game_id,))
+            return True
 
     def create_puzzle(self, game_id, move_ply, fen, solution_uci, solution_san):
         with self.connect() as db:
@@ -142,10 +160,7 @@ class Database:
         return [dict(row) for row in rows]
 
     def get_puzzle(self, puzzle_id, secret=False):
-        if secret:
-            query = "SELECT * FROM puzzles WHERE id=?"
-        else:
-            query = "SELECT id,game_id,move_ply,fen,hint_level,attempts,solved,created_at FROM puzzles WHERE id=?"
+        query = "SELECT * FROM puzzles WHERE id=?" if secret else "SELECT id,game_id,move_ply,fen,hint_level,attempts,solved,created_at FROM puzzles WHERE id=?"
         with self.connect() as db:
             row = db.execute(query, (puzzle_id,)).fetchone()
         return dict(row) if row else None
@@ -160,3 +175,8 @@ class Database:
             db.execute("INSERT INTO puzzle_attempts(puzzle_id,move,correct,created_at) VALUES (?,?,?,?)",
                 (puzzle_id, move, int(correct), datetime.now(timezone.utc).isoformat()))
             db.execute("UPDATE puzzles SET attempts=attempts+1, solved=MAX(solved,?) WHERE id=?", (int(correct), puzzle_id))
+
+    def save_coach_message(self, game_id, ply, question, answer):
+        with self.connect() as db:
+            db.execute("INSERT INTO coach_messages(game_id,ply,question,answer,created_at) VALUES (?,?,?,?,?)",
+                (game_id, ply, question, answer, datetime.now(timezone.utc).isoformat()))
