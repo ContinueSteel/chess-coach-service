@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chess Coach Service</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <h1>Chess Coach</h1>
+    <section id="import-section">
+        <h2>Import from Chess.com</h2>
+        <input type="text" id="chesscom-username" placeholder="Chess.com username" />
+        <button id="import-btn">Import Games</button>
+        <pre id="import-result"></pre>
+    </section>
+    <section id="upload-section">
+        <h2>Upload OTB PGN</h2>
+        <input type="file" id="pgn-file" accept=".pgn" />
+        <button id="upload-btn">Upload</button>
+        <pre id="upload-result"></pre>
+    </section>
+    <section id="analyse-section" style="display:none;">
+        <h2>Analyse Game</h2>
+        <textarea id="pgn-text" rows="10" cols="80" placeholder="Paste PGN here"></textarea><br/>
+        <button id="analyse-btn">Analyse</button>
+        <pre id="analyse-result"></pre>
+    </section>
+    <script src="script.js"></script>
+</body>
+</html>
